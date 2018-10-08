@@ -1,0 +1,170 @@
+{
+  "variables": {
+    "aws_access_key": "{{env `AWS_ACCESS_KEY_ID`}}",
+    "aws_secret_key": "{{env `AWS_SECRET_ACCESS_KEY`}}",
+    "username": "{{env `USERNAME`}}",
+    "region": "{{env `AWS_REGION`}}",
+    "ami_description": "{{env `AMI_DESCRIPTION`}}",    
+    "purpose": "Base CentOS Image",
+    "os": "Linux",
+    "os_version": "CentOS",
+    "release": "7"
+  },
+  "builders": [{
+    "access_key": "{{user `aws_access_key`}}",
+    "secret_key": "{{user `aws_secret_key`}}",
+    "ami_name": "{{user `ami_description`}} {{isotime \"2006-01-02-150405\"}}",
+    "ami_description": "{{user `ami_description`}} {{isotime \"2006-01-02-150405\"}}",
+    "instance_type": "t2.medium",
+    "type": "amazon-ebssurrogate",
+    "region": "{{user `region`}}",
+    "source_ami_filter": {
+      "filters": {
+        "owner-alias": "aws-marketplace",
+        "product-code": "aw0evgkw8e5c1q413zgy5pjce",
+        "virtualization-type": "hvm"
+      },
+      "owners": ["aws-marketplace"],
+      "most_recent": true
+    },
+    "ami_virtualization_type": "hvm",
+    "ami_block_device_mappings": [
+      {
+        "device_name": "/dev/sda1",
+        "volume_size": 8,
+        "encrypted": false,
+        "volume_type": "gp2",
+        "delete_on_termination": false
+      }
+    ],
+    "launch_block_device_mappings": [
+      {
+        "device_name": "/dev/xvdf",
+        "volume_size": 8,
+        "encrypted": false,
+        "volume_type": "gp2",
+        "delete_on_termination": true
+      }
+    ],
+    "ami_root_device": {
+      "source_device_name": "/dev/xvdf",
+      "device_name": "/dev/sda1",
+      "volume_size": "8",
+      "volume_type": "gp2",
+      "delete_on_termination": true
+    },
+    "ebs_optimized": false,
+    "ena_support": false,
+    "force_delete_snapshot": true,
+    "encrypt_boot": false,
+    "run_tags": {
+      "Creator": "{{user `username`}}",
+      "OS": "{{user `os`}}",
+      "OS_Version": "{{user `os_version`}}",
+      "Release": "{{user `release`}}",
+      "Base_AMI_Name": "{{ .SourceAMIName }}",
+      "Purpose": "{{user `purpose`}}",
+      "Builder": "Packer {{packer_version}}"
+    },
+    "run_volume_tags": {
+      "Creator": "{{user `username`}}",
+      "OS": "{{user `os`}}",
+      "OS_Version": "{{user `os_version`}}",
+      "Release": "{{user `release`}}",
+      "Base_AMI_Name": "{{ .SourceAMIName }}",
+      "Purpose": "{{user `purpose`}}",
+      "Builder": "Packer {{packer_version}}"
+    },
+    "tags": {
+      "Creator": "{{user `username`}}",
+      "OS": "{{user `os`}}",
+      "OS_Version": "{{user `os_version`}}",
+      "Release": "{{user `release`}}",
+      "Base_AMI_Name": "{{ .SourceAMIName }}",
+      "Purpose": "{{user `purpose`}}",
+      "Builder": "Packer {{packer_version}}"
+    },
+    "ssh_username": "centos",
+    "ssh_pty": "true"
+  }],
+  "provisioners": [
+    {
+      "type": "file",
+      "source": "bootstrap.sh",
+      "destination": "/tmp/bootstrap.sh"
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh '{{.Path}}'",
+      "inline_shebang": "/bin/sh -e -x",
+      "inline": [
+        "echo '*** Running bootstrap.sh script...'",
+        "chmod +x /tmp/bootstrap.sh",
+        "/tmp/bootstrap.sh",
+        "rm -f /tmp/bootstrap.sh"
+      ]
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh '{{.Path}}'",
+      "inline_shebang": "/bin/sh -e -x",
+      "inline": [
+        "echo '** Installing lsof ...'",
+        "yum -y install lsof",
+        "echo '** Installing xfsdump ...'",
+        "yum -y install xfsdump"
+      ]
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh '{{.Path}}'",
+      "inline_shebang": "/bin/sh -e -x",
+      "inline": [
+        "echo '** Patching system ...'",
+        "yum clean all",
+        "yum upgrade -y",
+        "yum clean all",
+        "rm -rf /var/cache/yum"
+      ]
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh '{{.Path}}'",
+      "inline_shebang": "/bin/sh -e -x",
+      "inline": [
+        "echo '** Shreding sensitive data ...'",
+        "shred -u /etc/ssh/*_key /etc/ssh/*_key.pub",
+        "shred -u /root/.*history /home/*/.*history",
+        "shred -u /root/.ssh/authorized_keys /home/*/.ssh/authorized_keys",
+        "sync; sleep 1; sync"
+      ]
+    },
+    {
+      "type": "shell",
+      "execute_command": "sudo -S sh '{{.Path}}'",
+      "inline_shebang": "/bin/sh -e -x",
+      "inline": [
+        "echo '** Removing marketplace tag ...'",
+        "echo '** Performing dd copy to copy disk structure & MBR information for AWS ...'",
+        "export HDD1=$(fdisk -l | grep ^'Disk /dev/' | head -n 1 | cut -d':' -f 1 | cut -d'/' -f 3)",
+        "export HDD2=$(fdisk -l | grep ^'Disk /dev/' | tail -n 1 | cut -d':' -f 1 | cut -d'/' -f 3)",
+        "export HDD_PARTITION=$(fdisk -l | grep ^'/dev' | cut -d'/' -f 3 | awk '{print $1}' | sed 's/'\"$HDD1\"'//g')",
+        "dd bs=1024M if=/dev/$HDD1 of=/dev/$HDD2 status=progress",
+        "echo '** Verification via fdisk -l output ...'",
+        "fdisk -l",
+        "echo '** Force reformating ...'",
+        "mkfs.xfs -f /dev/${HDD2}${HDD_PARTITION}",
+        "echo '** Mount the disk for second pass copy using xfsdump & xfsrestore ...'",
+        "mount /dev/${HDD2}${HDD_PARTITION} /mnt",
+        "echo '** Performing second pass copy using xfsdump & xfsrestore'",
+        "xfsdump -l0 -J - /dev/${HDD1}${HDD_PARTITION} | xfsrestore - /mnt",
+        "echo '** Fix fstab ...'",
+        "sed -i \"s/$(xfs_admin -u /dev/${HDD1}${HDD_PARTITION} | awk '{print $3};')/$(xfs_admin -u /dev/${HDD2}${HDD_PARTITION} | awk '{print $3};')/g\" /mnt/etc/fstab",
+        "echo '** Fixing grub ...'",
+        "sed -i \"s/$(xfs_admin -u /dev/${HDD1}${HDD_PARTITION} | awk '{print $3};')/$(xfs_admin -u /dev/${HDD2}${HDD_PARTITION} | awk '{print $3};')/g\" /mnt/boot/grub/grub.conf /mnt/boot/grub/menu.lst /mnt/boot/grub2/grub.cfg",
+        "umount /mnt"
+      ]
+    }
+  ]
+}
+
